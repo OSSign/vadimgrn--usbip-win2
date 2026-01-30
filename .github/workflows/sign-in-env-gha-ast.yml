@@ -1,0 +1,99 @@
+name: Build and Sign
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      source_branch:
+        description: 'The source branch or ref to build from'
+        default: 'main'
+        required: true
+
+      release_name:
+        description: 'The name for the release'
+        required: true
+
+
+env:
+  SOURCE_REPOSITORY: 'xyz/xyz'
+  SOURCE_REPOSITORY_NAME: 'this-project'
+
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ github.event.inputs.source_branch }}
+          fetch-depth: 1
+
+      ########
+      ## INSERT BUILD HERE
+      ########
+
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-to-sign
+          path: |
+            path/*
+            files/*
+
+
+  sign:
+    environment: OSSign
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: files-to-sign
+      
+
+      - uses: ossign/ossign@main
+        with:
+          config: ${{ secrets.OSSIGN_CONFIG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          installOnly: false
+      
+          # Sign a single file
+          inputFile: path/to/file.exe
+      
+          # Sign multiple files using a glob pattern
+          inputFiles: path/to/*.exe
+      
+          # Type of signature. Can be "pecoff", "msi", "jar", "apk" or "dmg"
+          signatureType: pecoff
+
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.msi
+            dist/*.exe
+          name: ${{ github.event.inputs.release_name }}
+          tag_name: ${{ github.run_id }}
+          body: |
+            <img src="https://github.com/ossign.png" alt="OSSign Logo" width="100" height="100" />
+            # Signed Release ${{ github.event.inputs.release_name }}
+            
+            These are the distributable files for the signed release of ${{ env.SOURCE_REPOSITORY_NAME }} ${{ github.event.inputs.release_name }}
+
+            The source code was fetched from https://github.com/${{ env.SOURCE_REPOSITORY }}@${{ github.event.inputs.source_branch }}
+            
+          
+
+
