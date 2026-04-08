@@ -48,6 +48,8 @@ jobs:
 
     - name: Build solution
       run: |
+        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
         dotnet build usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
         dotnet build usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
         ls .
@@ -57,6 +59,7 @@ jobs:
       run: |
         makecab.exe /f utils/tools/usbip-win2-amd64.ddf
         makecab.exe /f utils/tools/usbip-win2-arm64.ddf
+        
 
     - name: Archive build artifacts
       if: success()
