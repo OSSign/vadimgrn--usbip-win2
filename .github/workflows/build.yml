@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: warp-windows-2025-x64-32x
 
     steps:
     - name: Checkout repository
@@ -19,6 +19,11 @@ jobs:
         submodules: 'recursive'
         repository: 'vadimgrn/usbip-win2'
         ref: 'master'
+    
+    - name: Checkout this repository
+      uses: actions/checkout@v5
+      with:
+        path: utils
 
     - name: Cache Packages
       id: cache-packages
@@ -43,10 +48,15 @@ jobs:
 
     - name: Build solution
       run: |
-        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
-        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        dotnet build usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        dotnet build usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
         ls .
         ls ./x64/
+    
+    - name: Create driver packages
+      run: |
+        makecab.exe /f utils/tools/usbip-win2-amd64.ddf
+        makecab.exe /f utils/tools/usbip-win2-arm64.ddf
 
     - name: Archive build artifacts
       if: success()
@@ -56,3 +66,4 @@ jobs:
        path: |
         x64/*
         arm64/*
+        signed/*
