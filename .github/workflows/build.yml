@@ -32,6 +32,9 @@ jobs:
 
     - name: Install NuGet dependencies
       run: |
+        cd vcpkg
+        bootstrap-vcpkg.bat -disableMetrics
+        cd ..
         nuget restore usbip_win2.slnx
         $cPath = $(pwd).Path
         Write-Host "Current path: $cPath"
