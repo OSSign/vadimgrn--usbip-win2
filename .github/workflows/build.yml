@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: warp-windows-2025-x64-32x
+    runs-on: win2k25-xl
 
     steps:
     - name: Checkout repository
