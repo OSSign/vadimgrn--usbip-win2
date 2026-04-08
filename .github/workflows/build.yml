@@ -1,0 +1,55 @@
+name: Build Drivers and Executables
+
+on:
+  push:
+    branches:
+      - test-action
+      - ossign
+
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+        submodules: 'recursive'
+        repository: 'vadimgrn/usbip-win2'
+        ref: 'master'
+
+    - name: Cache Packages
+      id: cache-packages
+      uses: actions/cache@v4
+      with:
+        path: packages
+        key: ${{ runner.os }}-packages-x64
+
+    - name: Set up Visual Studio
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Install NuGet dependencies
+      run: |
+        nuget restore usbip_win2.sln
+        $cPath = $(pwd).Path
+        Write-Host "Current path: $cPath"
+        Add-Content $env:GITHUB_PATH "$cPath\packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\c\bin\10.0.26100.0\x64"
+        cat $env:GITHUB_PATH
+
+    - name: Build solution
+      run: |
+        msbuild usbip_win2.sln /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        msbuild usbip_win2.sln /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        ls .
+        ls ./x64/
+
+    - name: Archive build artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+       name: build-artifacts
+       path: |
+        x64/*
+        arm64/*
