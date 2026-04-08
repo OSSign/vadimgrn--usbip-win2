@@ -32,7 +32,7 @@ jobs:
 
     - name: Install NuGet dependencies
       run: |
-        nuget restore usbip_win2.sln
+        nuget restore usbip_win2.slnx
         $cPath = $(pwd).Path
         Write-Host "Current path: $cPath"
         Add-Content $env:GITHUB_PATH "$cPath\packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\c\bin\10.0.26100.0\x64"
@@ -40,8 +40,8 @@ jobs:
 
     - name: Build solution
       run: |
-        msbuild usbip_win2.sln /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
-        msbuild usbip_win2.sln /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
+        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m || & { "ignore failure"; $global:LASTEXITCODE = 0 }
         ls .
         ls ./x64/
 
