@@ -1,0 +1,198 @@
+name: Rebuild With Signed Drivers ZIP
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch/tag/ref from vadimgrn/usbip-win2
+        required: true
+        default: master
+      signed_zip_url:
+        description: Public URL to ZIP containing usbip2_ude and usbip2_filter folders
+        required: true
+
+jobs:
+  rebuild:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - name: Checkout source repository
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+        submodules: recursive
+        repository: vadimgrn/usbip-win2
+        ref: ${{ github.event.inputs.source_ref }}
+
+    - name: Checkout workflow utilities repository
+      uses: actions/checkout@v5
+      with:
+        path: utils
+
+    - name: Cache packages
+      uses: actions/cache@v4
+      with:
+        path: packages
+        key: ${{ runner.os }}-packages-x64
+
+    - name: Set up Visual Studio
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Install OSSign binary
+      uses: ossign/ossign@main
+      with:
+        installOnly: true
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install NuGet dependencies
+      shell: pwsh
+      run: |
+        cd vcpkg
+        bootstrap-vcpkg.bat -disableMetrics
+        cd ..
+        nuget restore usbip_win2.slnx
+        $currentPath = (Get-Location).Path
+        Add-Content $env:GITHUB_PATH "$currentPath\packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\c\bin\10.0.26100.0\x64"
+
+    - name: Make adjustments to binaries
+      shell: bash
+      run: |
+        sed -i 's/#define TEST_SIGNED_DRIVERS/SignTool=sign_util -t pecoff -o $f $f' userspace/innosetup/setup.iss
+        sed -i 's/#define CertPwd "usbip"/SignedUninstaller=yes/' userspace/innosetup/setup.iss
+        sed -i 's/$(InnoSetupCompiler)/$(InnoSetupCompiler) /Ssign_util="ossign.exe $p"/g' userspace/innosetup/innosetup.vcxproj
+
+    - name: Build solution binaries
+      shell: pwsh
+      env:
+        OSSIGN_CONFIG: ${{ secrets.OSSIGN_CONFIG }}
+      run: |
+        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m
+        msbuild usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m
+        dotnet build usbip_win2.slnx /p:Configuration=Release /p:Platform=x64 /m
+        dotnet build usbip_win2.slnx /p:Configuration=Release /p:Platform=arm64 /m
+
+    - name: Download and extract signed drivers ZIP
+      shell: pwsh
+      run: |
+        $zipUrl = "${{ github.event.inputs.signed_zip_url }}"
+        $zipPath = Join-Path $PWD "signed-drivers.zip"
+        $extractPath = Join-Path $PWD "signed-drivers"
+
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+        if (Test-Path $extractPath) {
+          Remove-Item -Path $extractPath -Recurse -Force
+        }
+        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+        $udeDir = Get-ChildItem -Path $extractPath -Directory -Recurse |
+          Where-Object { $_.Name -ieq "usbip2_ude" } |
+          Select-Object -First 1
+        $filterDir = Get-ChildItem -Path $extractPath -Directory -Recurse |
+          Where-Object { $_.Name -ieq "usbip2_filter" } |
+          Select-Object -First 1
+
+        if (-not $udeDir) {
+          throw "Folder usbip2_ude was not found in the ZIP archive."
+        }
+        if (-not $filterDir) {
+          throw "Folder usbip2_filter was not found in the ZIP archive."
+        }
+
+        Write-Host "Found signed folders:"
+        Write-Host "- $($udeDir.FullName)"
+        Write-Host "- $($filterDir.FullName)"
+
+    - name: Inject signed drivers into release and package outputs
+      shell: pwsh
+      run: |
+        $extractPath = Join-Path $PWD "signed-drivers"
+        $searchRoots = @(
+          (Get-ChildItem -Path $extractPath -Directory -Recurse | Where-Object { $_.Name -ieq "usbip2_ude" } | Select-Object -First 1).FullName,
+          (Get-ChildItem -Path $extractPath -Directory -Recurse | Where-Object { $_.Name -ieq "usbip2_filter" } | Select-Object -First 1).FullName
+        )
+
+        $platformTargets = @{
+          x64 = @("x64\Release", "x64\Release\package")
+          arm64 = @("arm64\Release", "arm64\Release\package")
+        }
+
+        foreach ($targetDir in ($platformTargets.x64 + $platformTargets.arm64)) {
+          New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        function Get-SignedFile([string]$fileName, [string]$platform, [string[]]$roots) {
+          $candidates = Get-ChildItem -Path $roots -File -Recurse -Filter $fileName -ErrorAction SilentlyContinue
+          if (-not $candidates -or $candidates.Count -eq 0) {
+            throw "Signed file '$fileName' was not found in ZIP content."
+          }
+
+          if ($candidates.Count -eq 1) {
+            return $candidates[0]
+          }
+
+          $platformHints = if ($platform -eq "x64") { @("x64", "amd64") } else { @("arm64") }
+          foreach ($candidate in $candidates) {
+            $pathLower = $candidate.FullName.ToLowerInvariant()
+            foreach ($hint in $platformHints) {
+              if ($pathLower -like "*$hint*") {
+                return $candidate
+              }
+            }
+          }
+
+          return $candidates[0]
+        }
+
+        $requiredFiles = @(
+          "usbip2_ude.inf",
+          "usbip2_ude.sys",
+          "usbip2_ude.cat",
+          "usbip2_filter.inf",
+          "usbip2_filter.sys",
+          "usbip2_filter.cat"
+        )
+
+        foreach ($platform in $platformTargets.Keys) {
+          foreach ($fileName in $requiredFiles) {
+            $signedFile = Get-SignedFile -fileName $fileName -platform $platform -roots $searchRoots
+            foreach ($targetDir in $platformTargets[$platform]) {
+              Copy-Item -Path $signedFile.FullName -Destination (Join-Path $targetDir $fileName) -Force
+            }
+            Write-Host "Injected $fileName for $platform from $($signedFile.FullName)"
+          }
+        }
+
+    - name: Rebuild installer target with signed package files
+      shell: pwsh
+      env:
+        OSSIGN_CONFIG: ${{ secrets.OSSIGN_CONFIG }}
+      run: |
+        $targets = @("innosetup", "setup")
+        $built = $false
+
+        foreach ($target in $targets) {
+          msbuild usbip_win2.slnx /t:$target /p:Configuration=Release /p:Platform=x64 /m
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Installer target '$target' built successfully."
+            $built = $true
+            break
+          }
+          Write-Warning "Target '$target' failed or was not found."
+        }
+
+        if (-not $built) {
+          Write-Warning "Installer target was not rebuilt; continuing with available binaries."
+        }
+
+
+    - name: Archive rebuilt artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rebuilt-with-signed-drivers
+        path: |
+          x64/*
+          arm64/*
