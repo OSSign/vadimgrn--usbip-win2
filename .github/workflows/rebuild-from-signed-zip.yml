@@ -194,5 +194,4 @@ jobs:
       with:
         name: rebuilt-with-signed-drivers
         path: |
-          x64/*
-          arm64/*
+          USBip-0*.exe
