@@ -1,11 +1,11 @@
 name: Build Drivers and Executables
 
 on:
-  push:
+  #push:
     #branches:
     #  - test-action
     #  - ossign
-    workflow_dispatch:
+  workflow_dispatch:
 
 
 jobs:
